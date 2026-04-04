@@ -1,0 +1,137 @@
+//@version=6
+indicator(title="VWAP EMA Cross", shorttitle="VWAP EMA Cross", overlay=true)
+
+// VWAP SETTINGS
+hideonDWM = input(false, title="Hide VWAP on 1D or Above", group="VWAP Settings")
+
+var anchor = input.string(
+ "Session",
+ title="Anchor Period",
+ options=["Session","Week","Month","Quarter","Year","Decade","Century","Earnings","Dividends","Splits"],
+ group="VWAP Settings"
+)
+
+src = input(title="Source", defval=hlc3, group="VWAP Settings")
+offset = input.int(0, title="Offset", group="VWAP Settings")
+
+// EMA INPUT
+emaLength = input.int(5, title="EMA Length", minval=1)
+
+// EMA CALCULATION
+emaValue = ta.ema(close, emaLength)
+
+// VWAP BASE LOGIC
+cumVolume = ta.cum(volume)
+
+if barstate.islast and cumVolume == 0
+    runtime.error("No volume is provided by the data vendor.")
+
+isNewPeriod = switch anchor
+    "Earnings" =>
+        new_earnings_actual = request.earnings(syminfo.tickerid, earnings.actual, barmerge.gaps_on, barmerge.lookahead_on, ignore_invalid_symbol=true)
+        new_earnings_standardized = request.earnings(syminfo.tickerid, earnings.standardized, barmerge.gaps_on, barmerge.lookahead_on, ignore_invalid_symbol=true)
+        not na(new_earnings_actual) or not na(new_earnings_standardized)
+
+    "Dividends" =>
+        new_dividends = request.dividends(syminfo.tickerid, dividends.gross, barmerge.gaps_on, barmerge.lookahead_on, ignore_invalid_symbol=true)
+        not na(new_dividends)
+
+    "Splits" =>
+        new_split = request.splits(syminfo.tickerid, splits.denominator, barmerge.gaps_on, barmerge.lookahead_on, ignore_invalid_symbol=true)
+        not na(new_split)
+
+    "Session" => timeframe.change("D")
+    "Week" => timeframe.change("W")
+    "Month" => timeframe.change("M")
+    "Quarter" => timeframe.change("3M")
+    "Year" => timeframe.change("12M")
+    "Decade" => timeframe.change("12M") and year % 10 == 0
+    "Century" => timeframe.change("12M") and year % 100 == 0
+    => false
+
+isEsdAnchor = anchor == "Earnings" or anchor == "Dividends" or anchor == "Splits"
+
+if na(src[1]) and not isEsdAnchor
+    isNewPeriod := true
+
+float vwapValue = na
+
+if not (hideonDWM and timeframe.isdwm)
+    [_vwap, _, _] = ta.vwap(src, isNewPeriod, 1)
+    vwapValue := _vwap
+
+// CROSS CONDITIONS
+bullCross = ta.crossover(emaValue, vwapValue)
+bearCross = ta.crossunder(emaValue, vwapValue)
+
+// PLOTS
+plot(vwapValue, title="VWAP", color=#2962FF, linewidth=2, offset=offset)
+plot(emaValue, title="EMA", color=color.orange, linewidth=2)
+
+// SIGNALS
+plotshape(bullCross, title="Buy Signal", location=location.belowbar, color=color.green, style=shape.triangleup, size=size.small)
+plotshape(bearCross, title="Sell Signal", location=location.abovebar, color=color.red, style=shape.triangledown, size=size.small)
+
+
+// ADX SETTINGS
+adxlen = input(14, title="ADX Smoothing", group="ADX Settings")
+dilen = input(14, title="DI Length", group="ADX Settings")
+
+dirmov(len) =>
+    up = ta.change(high)
+    down = -ta.change(low)
+    plusDM = na(up) ? na : (up > down and up > 0 ? up : 0)
+    minusDM = na(down) ? na : (down > up and down > 0 ? down : 0)
+    truerange = ta.rma(ta.tr, len)
+    plus = fixnan(100 * ta.rma(plusDM, len) / truerange)
+    minus = fixnan(100 * ta.rma(minusDM, len) / truerange)
+    [plus, minus]
+
+adx(dilen, adxlen) =>
+    [plus, minus] = dirmov(dilen)
+    sum = plus + minus
+    adx = 100 * ta.rma(math.abs(plus - minus) / (sum == 0 ? 1 : sum), adxlen)
+    adx
+
+adxValue = adx(dilen, adxlen)
+
+// DISPLAY ADX VALUE
+var table adxTable = table.new(position.top_right, 1, 1)
+
+if barstate.islast
+    table.cell(adxTable, 0, 0, "Trend Strength : " + str.tostring(math.round(adxValue)), text_color=color.white, bgcolor=color.black)
+
+
+// =============================
+// BIG CANDLE BACKGROUND HIGHLIGHT
+// =============================
+
+atrLength = input.int(14, "ATR Length", group="Big Candle Settings")
+multiplier = input.float(2.0, "Big Candle ATR Multiplier", group="Big Candle Settings")
+cooldownBars = input.int(6, "Minimum Bars Between Signals", group="Big Candle Settings")
+
+atrValue = ta.atr(atrLength)
+
+candleRange = high - low
+isBigCandle = candleRange > atrValue * multiplier
+
+var int lastSignalBar = -100
+showSignal = false
+
+if isBigCandle
+    if bar_index - lastSignalBar > cooldownBars
+        showSignal := true
+        lastSignalBar := bar_index
+
+isBull = close > open
+isBear = close < open
+
+color bgColor = na
+
+if showSignal and isBull
+    bgColor := color.new(color.green, 80)
+else
+    if showSignal and isBear
+        bgColor := color.new(color.red, 80)
+
+bgcolor(bgColor)
