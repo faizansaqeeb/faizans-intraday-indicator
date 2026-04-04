@@ -103,35 +103,26 @@ if barstate.islast
 
 
 // =============================
-// BIG CANDLE BACKGROUND HIGHLIGHT
+// BIG CANDLE BACKGROUND HIGHLIGHT (NO COOLDOWN)
 // =============================
 
 atrLength = input.int(14, "ATR Length", group="Big Candle Settings")
 multiplier = input.float(2.0, "Big Candle ATR Multiplier", group="Big Candle Settings")
-cooldownBars = input.int(6, "Minimum Bars Between Signals", group="Big Candle Settings")
 
 atrValue = ta.atr(atrLength)
 
 candleRange = high - low
 isBigCandle = candleRange > atrValue * multiplier
 
-var int lastSignalBar = -100
-showSignal = false
-
-if isBigCandle
-    if bar_index - lastSignalBar > cooldownBars
-        showSignal := true
-        lastSignalBar := bar_index
-
 isBull = close > open
 isBear = close < open
 
 color bgColor = na
 
-if showSignal and isBull
+if isBigCandle and isBull
     bgColor := color.new(color.green, 80)
 else
-    if showSignal and isBear
+    if isBigCandle and isBear
         bgColor := color.new(color.red, 80)
 
 bgcolor(bgColor)
